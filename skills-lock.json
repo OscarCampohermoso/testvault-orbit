@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "aesthetic": {
+      "source": "mrgoonie/claudekit-skills",
+      "sourceType": "github",
+      "computedHash": "a11a2b2711f2ba6f26d3e74938ba0c7f85cb33666162f88b6acd6d46d83cbca1"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "063a0e6448123cd359ad0044cc46b0e490cc7964d45ef4bb9fd842bd2ffbca67"
+    }
+  }
+}
