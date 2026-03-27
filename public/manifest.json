@@ -1,12 +1,10 @@
 {
   "manifest_version": 3,
   "name": "TestVault Orbit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local test account vault for non-production apps. Store, autofill, and share dev/staging credentials.",
   "permissions": [
-    "activeTab",
     "storage",
-    "scripting",
     "clipboardWrite",
     "offscreen"
   ],
