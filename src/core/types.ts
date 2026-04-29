@@ -1,5 +1,16 @@
 export type Environment = 'local' | 'dev' | 'staging' | 'demo' | 'sandbox' | string
 
+export type CustomFieldType = 'text' | 'hidden' | 'checkbox'
+
+export interface CustomField {
+  id: string
+  type: CustomFieldType
+  label: string
+  value: string
+  checked: boolean
+  sortOrder: number
+}
+
 export type AccountStatus = 'active' | 'broken' | 'reset-needed'
 
 export interface Account {
@@ -18,6 +29,7 @@ export interface Account {
   createdAt: string
   updatedAt: string
   lastUsedAt?: string
+  customFields: CustomField[]
 }
 
 export interface VaultMetadata {
@@ -51,6 +63,7 @@ export interface TestVaultPack {
     persona?: string
     tags: string[]
     status: AccountStatus
+    customFields?: CustomField[]
   }>
 }
 

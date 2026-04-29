@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS vault_metadata (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS custom_fields (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  label TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '',
+  checked INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS import_history (
   id TEXT PRIMARY KEY,
   source_name TEXT NOT NULL,

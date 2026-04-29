@@ -1,8 +1,13 @@
 import { v4 as uuid } from 'uuid'
 import { getDb, persistDb } from './sqlite'
-import type { Account } from '../core/types'
+import type { Account, CustomField } from '../core/types'
 
-function rowToAccount(row: Record<string, unknown>, tags: string[], domainPatterns: string[]): Account {
+function rowToAccount(
+  row: Record<string, unknown>,
+  tags: string[],
+  domainPatterns: string[],
+  customFields: CustomField[],
+): Account {
   return {
     id: row.id as string,
     appName: row.app_name as string,
@@ -19,19 +24,38 @@ function rowToAccount(row: Record<string, unknown>, tags: string[], domainPatter
     lastUsedAt: (row.last_used_at as string) || undefined,
     tags,
     domainPatterns,
+    customFields,
   }
 }
 
-function getTagsForAccount(db: ReturnType<Awaited<ReturnType<typeof getDb>>['run']> extends void ? Awaited<ReturnType<typeof getDb>> : never, accountId: string): string[] {
+type Db = Awaited<ReturnType<typeof getDb>>
+
+function getTagsForAccount(db: Db, accountId: string): string[] {
   const results = db.exec('SELECT value FROM tags WHERE account_id = ?', [accountId])
   if (!results.length) return []
   return results[0].values.map((r: unknown[]) => r[0] as string)
 }
 
-function getPatternsForAccount(db: Awaited<ReturnType<typeof getDb>>, accountId: string): string[] {
+function getPatternsForAccount(db: Db, accountId: string): string[] {
   const results = db.exec('SELECT pattern FROM domain_patterns WHERE account_id = ?', [accountId])
   if (!results.length) return []
   return results[0].values.map((r: unknown[]) => r[0] as string)
+}
+
+function getCustomFieldsForAccount(db: Db, accountId: string): CustomField[] {
+  const results = db.exec(
+    'SELECT id, type, label, value, checked, sort_order FROM custom_fields WHERE account_id = ? ORDER BY sort_order ASC',
+    [accountId],
+  )
+  if (!results.length) return []
+  return results[0].values.map((r: unknown[]) => ({
+    id: r[0] as string,
+    type: r[1] as CustomField['type'],
+    label: r[2] as string,
+    value: r[3] as string,
+    checked: (r[4] as number) === 1,
+    sortOrder: r[5] as number,
+  }))
 }
 
 export async function getAllAccounts(): Promise<Account[]> {
@@ -45,7 +69,8 @@ export async function getAllAccounts(): Promise<Account[]> {
     columns.forEach((col: string, i: number) => { obj[col] = row[i] })
     const tags = getTagsForAccount(db, obj.id as string)
     const patterns = getPatternsForAccount(db, obj.id as string)
-    return rowToAccount(obj, tags, patterns)
+    const customFields = getCustomFieldsForAccount(db, obj.id as string)
+    return rowToAccount(obj, tags, patterns, customFields)
   })
 }
 
@@ -60,7 +85,8 @@ export async function getAccountById(id: string): Promise<Account | null> {
   columns.forEach((col: string, i: number) => { obj[col] = row[i] })
   const tags = getTagsForAccount(db, id)
   const patterns = getPatternsForAccount(db, id)
-  return rowToAccount(obj, tags, patterns)
+  const customFields = getCustomFieldsForAccount(db, id)
+  return rowToAccount(obj, tags, patterns, customFields)
 }
 
 export async function createAccount(data: Omit<Account, 'id' | 'createdAt' | 'updatedAt'>): Promise<Account> {
@@ -79,6 +105,12 @@ export async function createAccount(data: Omit<Account, 'id' | 'createdAt' | 'up
   }
   for (const pattern of data.domainPatterns || []) {
     db.run('INSERT INTO domain_patterns (id, account_id, pattern) VALUES (?, ?, ?)', [uuid(), id, pattern])
+  }
+  for (const field of data.customFields || []) {
+    db.run(
+      'INSERT INTO custom_fields (id, account_id, type, label, value, checked, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [field.id || uuid(), id, field.type, field.label, field.value || '', field.checked ? 1 : 0, field.sortOrder ?? 0],
+    )
   }
 
   await persistDb()
@@ -123,12 +155,23 @@ export async function updateAccount(id: string, data: Partial<Account>): Promise
     }
   }
 
+  if (data.customFields !== undefined) {
+    db.run('DELETE FROM custom_fields WHERE account_id = ?', [id])
+    for (const field of data.customFields) {
+      db.run(
+        'INSERT INTO custom_fields (id, account_id, type, label, value, checked, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [field.id || uuid(), id, field.type, field.label, field.value || '', field.checked ? 1 : 0, field.sortOrder ?? 0],
+      )
+    }
+  }
+
   await persistDb()
   return getAccountById(id)
 }
 
 export async function deleteAccount(id: string): Promise<void> {
   const db = await getDb()
+  db.run('DELETE FROM custom_fields WHERE account_id = ?', [id])
   db.run('DELETE FROM tags WHERE account_id = ?', [id])
   db.run('DELETE FROM domain_patterns WHERE account_id = ?', [id])
   db.run('DELETE FROM accounts WHERE id = ?', [id])

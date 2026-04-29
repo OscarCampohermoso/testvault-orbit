@@ -27,6 +27,7 @@ export async function exportPack(
       persona: a.persona,
       tags: a.tags,
       status: a.status,
+      customFields: a.customFields.length > 0 ? a.customFields : undefined,
     })),
   }
 
@@ -86,6 +87,7 @@ export async function importPack(
     await createAccount({
       ...item,
       lastUsedAt: undefined,
+      customFields: item.customFields ?? [],
     })
     imported++
   }

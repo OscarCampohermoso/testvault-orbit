@@ -20,6 +20,7 @@ const emptyAccount: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> = {
   domainPatterns: [],
   status: 'active',
   lastUsedAt: undefined,
+  customFields: [],
 }
 
 export default function OptionsApp() {

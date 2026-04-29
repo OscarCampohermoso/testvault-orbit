@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowsClockwise,
+  ArrowLeft,
   BugBeetleIcon,
   Check,
+  CheckSquare,
   Copy,
   DiceSixIcon,
+  Eye,
+  EyeSlash,
   ExportIcon,
   FileArrowDown,
   FileArrowUp,
@@ -22,12 +26,13 @@ import {
   User,
   X,
 } from '@phosphor-icons/react'
+import { v4 as uuid } from 'uuid'
 import { sendMessage } from '../shared/messaging'
-import type { Account, AccountStatus, Environment } from '../core/types'
+import type { Account, AccountStatus, CustomField, CustomFieldType, Environment } from '../core/types'
 import { ENVIRONMENTS, ISSUES_URL, STATUSES } from '../shared/constants'
 import './popup.css'
 
-type Screen = 'vault' | 'editor' | 'tools' | 'settings'
+type Screen = 'vault' | 'editor' | 'tools' | 'settings' | 'detail'
 type ThemeMode = 'light' | 'dark' | 'system'
 
 const THEME_KEY = 'testvault_theme'
@@ -45,6 +50,7 @@ const emptyAccount: Omit<Account, 'id' | 'createdAt' | 'updatedAt'> = {
   domainPatterns: [],
   status: 'active',
   lastUsedAt: undefined,
+  customFields: [],
 }
 
 const adjectives = ['Solar', 'Nimbus', 'Quantum', 'Arctic', 'Velvet', 'Turbo', 'Orbit', 'Nova']
@@ -96,6 +102,14 @@ export default function PopupApp() {
   const [patternsInput, setPatternsInput] = useState('')
   const [formError, setFormError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [customFields, setCustomFields] = useState<CustomField[]>([])
+  const [showAddField, setShowAddField] = useState(false)
+  const [newFieldType, setNewFieldType] = useState<CustomFieldType>('text')
+  const [newFieldLabel, setNewFieldLabel] = useState('')
+  const [newFieldValue, setNewFieldValue] = useState('')
+  const [newFieldChecked, setNewFieldChecked] = useState(false)
+
+  const [detailAccount, setDetailAccount] = useState<Account | null>(null)
 
   const [exportLabel, setExportLabel] = useState('My Test Accounts')
   const [exportPass, setExportPass] = useState('')
@@ -184,11 +198,13 @@ export default function PopupApp() {
 
   const openEditor = (account?: Account) => {
     setFormError('')
+    setShowAddField(false)
     if (account) {
       setEditingId(account.id)
       setForm({ ...account })
       setTagsInput(account.tags.join(', '))
       setPatternsInput(account.domainPatterns.join(', '))
+      setCustomFields(account.customFields ?? [])
     } else {
       const detected = normalizeUrl(currentUrl)
       setEditingId(null)
@@ -201,6 +217,7 @@ export default function PopupApp() {
       })
       setTagsInput('')
       setPatternsInput(detected.hostname)
+      setCustomFields([])
     }
     setScreen('editor')
   }
@@ -232,6 +249,7 @@ export default function PopupApp() {
         loginUrl,
         tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean),
         domainPatterns: domainPatterns.length > 0 ? domainPatterns : detected.hostname ? [detected.hostname] : [],
+        customFields,
       }
 
       const res = editingId
@@ -423,6 +441,7 @@ export default function PopupApp() {
                     onCopy={handleCopy}
                     onEdit={openEditor}
                     onDelete={handleDelete}
+                    onDetail={(a) => { setDetailAccount(a); setScreen('detail') }}
                   />
                 ))}
               </section>
@@ -442,6 +461,7 @@ export default function PopupApp() {
                   onCopy={handleCopy}
                   onEdit={openEditor}
                   onDelete={handleDelete}
+                  onDetail={(a) => { setDetailAccount(a); setScreen('detail') }}
                 />
               ))}
             </section>
@@ -501,6 +521,95 @@ export default function PopupApp() {
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
               />
             </label>
+
+            {/* ── Custom Fields ── */}
+            <div className="cf-section">
+              <div className="cf-header">
+                <span>Custom fields</span>
+                <button className="btn" type="button" onClick={() => setShowAddField((v) => !v)}>
+                  <Plus size={13} /> Add field
+                </button>
+              </div>
+
+              {showAddField && (
+                <div className="cf-add-panel">
+                  <div className="cf-add-row">
+                    <select
+                      value={newFieldType}
+                      onChange={(e) => { setNewFieldType(e.target.value as CustomFieldType); setNewFieldChecked(false); setNewFieldValue('') }}
+                    >
+                      <option value="text">Text</option>
+                      <option value="hidden">Hidden</option>
+                      <option value="checkbox">Checkbox</option>
+                    </select>
+                    <input
+                      placeholder="Label (required)"
+                      value={newFieldLabel}
+                      onChange={(e) => setNewFieldLabel(e.target.value)}
+                    />
+                  </div>
+                  {newFieldType !== 'checkbox' && (
+                    <input
+                      className="cf-value-input"
+                      placeholder={newFieldType === 'hidden' ? 'Secret value' : 'Value'}
+                      type={newFieldType === 'hidden' ? 'password' : 'text'}
+                      value={newFieldValue}
+                      onChange={(e) => setNewFieldValue(e.target.value)}
+                    />
+                  )}
+                  {newFieldType === 'checkbox' && (
+                    <label className="cf-check-label">
+                      <input
+                        type="checkbox"
+                        checked={newFieldChecked}
+                        onChange={(e) => setNewFieldChecked(e.target.checked)}
+                      />
+                      Checked by default
+                    </label>
+                  )}
+                  <button
+                    className="btn btn-primary cf-add-confirm"
+                    type="button"
+                    onClick={() => {
+                      if (!newFieldLabel.trim()) return
+                      const field: CustomField = {
+                        id: uuid(),
+                        type: newFieldType,
+                        label: newFieldLabel.trim(),
+                        value: newFieldType !== 'checkbox' ? newFieldValue : '',
+                        checked: newFieldType === 'checkbox' ? newFieldChecked : false,
+                        sortOrder: customFields.length,
+                      }
+                      setCustomFields((prev) => [...prev, field])
+                      setNewFieldLabel('')
+                      setNewFieldValue('')
+                      setNewFieldChecked(false)
+                      setShowAddField(false)
+                    }}
+                  >
+                    <Check size={13} /> Confirm
+                  </button>
+                </div>
+              )}
+
+              {customFields.map((cf, idx) => (
+                <div key={cf.id} className="cf-item">
+                  <span className={`cf-type-badge cf-type-${cf.type}`}>{cf.type}</span>
+                  <span className="cf-label">{cf.label}</span>
+                  {cf.type === 'checkbox' && (
+                    <CheckSquare size={14} className={cf.checked ? 'cf-checked' : 'cf-unchecked'} />
+                  )}
+                  <button
+                    className="btn btn-danger cf-remove"
+                    type="button"
+                    onClick={() => setCustomFields((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <div className="form-actions">
               <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
                 <FloppyDisk size={16} /> {isSaving ? 'Saving...' : 'Save'}
@@ -511,6 +620,7 @@ export default function PopupApp() {
             </div>
           </section>
         )}
+
 
         {screen === 'tools' && (
           <section className="section form-section">
@@ -567,7 +677,19 @@ export default function PopupApp() {
             </div>
           </section>
         )}
+
+        {screen === 'detail' && detailAccount && (
+          <DetailScreen
+            account={detailAccount}
+            copiedId={copiedId}
+            onCopy={handleCopy}
+            onEdit={(a) => openEditor(a)}
+            onDelete={async (id) => { await handleDelete(id); setScreen('vault') }}
+            onBack={() => setScreen('vault')}
+          />
+        )}
       </main>
+
 
       <nav className="bottom-nav">
         <button className={`nav-btn ${screen === 'vault' ? 'active' : ''}`} onClick={() => setScreen('vault')}>
@@ -596,6 +718,7 @@ function AccountRow({
   onCopy,
   onEdit,
   onDelete,
+  onDetail,
 }: {
   account: Account
   copiedId: string | null
@@ -605,11 +728,12 @@ function AccountRow({
   onCopy: (text: string, id: string) => void
   onEdit: (account?: Account) => void
   onDelete: (id: string) => void
+  onDetail: (account: Account) => void
 }) {
   return (
-    <article className="account-row">
+    <article className="account-row" onClick={() => onDetail(account)} style={{ cursor: 'pointer' }}>
       <div className="account-top">
-        <label className="check-wrap">
+        <label className="check-wrap" onClick={(e) => e.stopPropagation()}>
           <input type="checkbox" checked={selected} onChange={() => onSelect(account.id)} />
         </label>
         <div className="account-main">
@@ -621,7 +745,7 @@ function AccountRow({
         </div>
         <span className={`status-dot status-${account.status}`} />
       </div>
-      <div className="account-actions">
+      <div className="account-actions" onClick={(e) => e.stopPropagation()}>
         <button className="btn btn-primary" onClick={() => onAutofill(account)}>
           <ShieldCheck size={14} /> Fill
         </button>
@@ -651,6 +775,138 @@ function AccountRow({
   )
 }
 
+function CustomFieldDetailRow({
+  field,
+  copiedId,
+  onCopy,
+}: {
+  field: import('../core/types').CustomField
+  copiedId: string | null
+  onCopy: (text: string, id: string) => void
+}) {
+  const [revealed, setRevealed] = useState(false)
+  const copyKey = `cf-${field.id}`
+
+  if (field.type === 'checkbox') {
+    return (
+      <div className="detail-cf-row">
+        <span className="detail-cf-label">{field.label}</span>
+        <span className={`detail-cf-check ${field.checked ? 'detail-cf-on' : 'detail-cf-off'}`}>
+          {field.checked ? '✓ Yes' : '✗ No'}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="detail-cf-row">
+      <span className="detail-cf-label">{field.label}</span>
+      <span className="detail-cf-value">
+        {field.type === 'hidden' && !revealed ? '••••••••' : field.value || '—'}
+      </span>
+      <div className="detail-cf-actions">
+        {field.type === 'hidden' && (
+          <button className="btn" onClick={() => setRevealed((v) => !v)} title={revealed ? 'Hide' : 'Reveal'}>
+            {revealed ? <EyeSlash size={13} /> : <Eye size={13} />}
+          </button>
+        )}
+        <button className="btn" onClick={() => onCopy(field.value, copyKey)}>
+          {copiedId === copyKey ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function DetailScreen({
+  account,
+  copiedId,
+  onCopy,
+  onEdit,
+  onDelete,
+  onBack,
+}: {
+  account: Account
+  copiedId: string | null
+  onCopy: (text: string, id: string) => void
+  onEdit: (account: Account) => void
+  onDelete: (id: string) => Promise<void>
+  onBack: () => void
+}) {
+  return (
+    <section className="section detail-section">
+      <div className="detail-topbar">
+        <button className="btn" onClick={onBack}><ArrowLeft size={14} /> Back</button>
+        <div className="detail-actions">
+          <button className="btn" onClick={() => onEdit(account)}><PencilSimple size={14} /> Edit</button>
+          <button className="btn btn-danger" onClick={() => onDelete(account.id)}><Trash size={14} /></button>
+        </div>
+      </div>
+
+      <div className="detail-hero">
+        <strong className="detail-title">{account.title}</strong>
+        <p className="detail-meta">{account.appName} · {account.environment}</p>
+        <span className={`status-dot status-${account.status}`} style={{ display: 'inline-block', marginTop: 4 }} />
+      </div>
+
+      <div className="detail-fields">
+        <div className="detail-row">
+          <span className="detail-row-label">Username</span>
+          <span className="detail-row-value">{account.username}</span>
+          <button className="btn" onClick={() => onCopy(account.username, `du-${account.id}`)}>
+            {copiedId === `du-${account.id}` ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        </div>
+        <div className="detail-row">
+          <span className="detail-row-label">Password</span>
+          <span className="detail-row-value">••••••••</span>
+          <button className="btn" onClick={() => onCopy(account.password, `dp-${account.id}`)}>
+            {copiedId === `dp-${account.id}` ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        </div>
+        {account.loginUrl && (
+          <div className="detail-row">
+            <span className="detail-row-label">Login URL</span>
+            <span className="detail-row-value detail-url">{account.loginUrl}</span>
+          </div>
+        )}
+        {account.persona && (
+          <div className="detail-row">
+            <span className="detail-row-label">Persona</span>
+            <span className="detail-row-value">{account.persona}</span>
+          </div>
+        )}
+      </div>
+
+      {account.tags.length > 0 && (
+        <div className="tag-row" style={{ marginBottom: 10 }}>
+          {account.tags.map((tag) => <span key={tag} className="tag">{tag}</span>)}
+        </div>
+      )}
+      {account.domainPatterns.length > 0 && (
+        <div className="detail-patterns">
+          {account.domainPatterns.map((p) => <span key={p} className="tag">{p}</span>)}
+        </div>
+      )}
+      {account.notes && (
+        <div className="detail-notes">
+          <span className="detail-notes-label">Notes</span>
+          <p>{account.notes}</p>
+        </div>
+      )}
+
+      {account.customFields.length > 0 && (
+        <div className="detail-cf-section">
+          <span className="detail-cf-section-label">Custom fields</span>
+          {account.customFields.map((cf) => (
+            <CustomFieldDetailRow key={cf.id} field={cf} copiedId={copiedId} onCopy={onCopy} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function FormField({
   label,
   value,
@@ -671,3 +927,4 @@ function FormField({
     </label>
   )
 }
+
