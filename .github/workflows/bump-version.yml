@@ -1,0 +1,138 @@
+name: Auto Version Bump
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      type:
+        description: 'Override: tipo de incremento (deja vacío para auto-detección)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-bump
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Detect & bump version
+    runs-on: ubuntu-latest
+    # No ejecutar si el commit fue del propio bot (evita loop infinito)
+    if: "!contains(github.event.head_commit.message, 'chore: release v')"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Git Bot
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Determine bump type
+        id: bump_type
+        run: |
+          set -euo pipefail
+
+          # Si se ejecutó manualmente con override, usar ese
+          MANUAL_TYPE="${{ github.event.inputs.type }}"
+          if [ -n "$MANUAL_TYPE" ]; then
+            echo "type=$MANUAL_TYPE" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual override: $MANUAL_TYPE"
+            exit 0
+          fi
+
+          # Obtener el último tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --oneline)
+          else
+            COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline)
+          fi
+
+          # Si no hay commits nuevos, saltar
+          if [ -z "$COMMITS" ]; then
+            echo "No new commits since $LAST_TAG, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Commits since $LAST_TAG:"
+          echo "$COMMITS"
+
+          # Detectar tipo basado en conventional commits
+          # BREAKING CHANGE o feat!: → major
+          # feat: → minor
+          # fix: → patch
+          # Cualquier otro (chore:, docs:, style:, refactor:) → no bump
+          BUMP_TYPE=""
+
+          if echo "$COMMITS" | grep -qiE '(BREAKING CHANGE|^[a-z]+!:)'; then
+            BUMP_TYPE="major"
+          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ feat(\(.+\))?:'; then
+            BUMP_TYPE="minor"
+          elif echo "$COMMITS" | grep -qiE '^[a-f0-9]+ fix(\(.+\))?:'; then
+            BUMP_TYPE="patch"
+          fi
+
+          if [ -z "$BUMP_TYPE" ]; then
+            echo "No version-bumping commits found (feat/fix). Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Detected bump type: $BUMP_TYPE"
+          echo "type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version, commit & tag
+        if: steps.bump_type.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+
+          BUMP_TYPE="${{ steps.bump_type.outputs.type }}"
+
+          # 1. npm version actualiza package.json y package-lock.json
+          NEW_VERSION=$(npm version $BUMP_TYPE --no-git-tag-version)
+          VERSION_NUMBER=${NEW_VERSION#v}
+
+          # 2. Sincroniza manifest.json
+          node scripts/sync-versions.mjs $VERSION_NUMBER
+
+          # 3. Commit como el bot
+          git add package.json package-lock.json public/manifest.json
+          git commit -m "chore: release $NEW_VERSION"
+
+          # 4. Crear tag
+          git tag "$NEW_VERSION"
+
+          # 5. Push commit y tag (el tag activa el workflow de Release)
+          git push origin main
+          git push origin "$NEW_VERSION"
+
+          echo "🚀 Version bumped to $NEW_VERSION and tag pushed!"
