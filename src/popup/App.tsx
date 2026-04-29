@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowsClockwise,
+  BugBeetleIcon,
   Check,
   Copy,
   DiceSixIcon,
@@ -23,7 +24,7 @@ import {
 } from '@phosphor-icons/react'
 import { sendMessage } from '../shared/messaging'
 import type { Account, AccountStatus, Environment } from '../core/types'
-import { ENVIRONMENTS, STATUSES } from '../shared/constants'
+import { ENVIRONMENTS, ISSUES_URL, STATUSES } from '../shared/constants'
 import './popup.css'
 
 type Screen = 'vault' | 'editor' | 'tools' | 'settings'
@@ -99,6 +100,7 @@ export default function PopupApp() {
   const [exportLabel, setExportLabel] = useState('My Test Accounts')
   const [exportPass, setExportPass] = useState('')
   const [importPass, setImportPass] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
 
   const [theme, setTheme] = useState<ThemeMode>('system')
 
@@ -274,18 +276,18 @@ export default function PopupApp() {
 
   const handleExport = async () => {
     const ids = selectedIds.size > 0 ? Array.from(selectedIds) : null
-    const res = await sendMessage<{ data: string | ArrayBuffer; encrypted: boolean }>({
+    const res = await sendMessage<{ data: string | number[]; encrypted: boolean }>({
       type: 'EXPORT_PACK',
       payload: { accountIds: ids, label: exportLabel, passphrase: exportPass || undefined },
     })
 
     if (!res.success || !res.data) {
-      setStatusMsg('Export failed')
+      setStatusMsg('Export failed: ' + (res.error || 'unknown'))
       return
     }
 
     const blob = res.data.encrypted
-      ? new Blob([res.data.data as ArrayBuffer], { type: 'application/octet-stream' })
+      ? new Blob([new Uint8Array(res.data.data as number[])], { type: 'application/octet-stream' })
       : new Blob([res.data.data as string], { type: 'application/json' })
 
     const url = URL.createObjectURL(blob)
@@ -302,19 +304,46 @@ export default function PopupApp() {
     if (!file) return
 
     const isEncrypted = !file.name.endsWith('.json')
-    const data: string | ArrayBuffer = isEncrypted && importPass ? await file.arrayBuffer() : await file.text()
+    setIsImporting(true)
+    setStatusMsg('')
 
-    const res = await sendMessage<{ imported: number; skipped: number }>({
-      type: 'IMPORT_PACK',
-      payload: { data, passphrase: importPass || undefined },
-    })
+    try {
+      let data: string | number[]
 
-    if (res.success && res.data) {
-      setStatusMsg(`Imported ${res.data.imported}, skipped ${res.data.skipped}`)
-      await loadAccounts()
-    } else {
-      setStatusMsg('Import failed')
+      if (isEncrypted && importPass) {
+        data = Array.from(new Uint8Array(await file.arrayBuffer()))
+      } else {
+        data = await file.text()
+        if (isEncrypted) {
+          try {
+            JSON.parse(data)
+          } catch {
+            throw new Error('Passphrase required for encrypted pack')
+          }
+        }
+      }
+
+      const res = await sendMessage<{ imported: number; skipped: number }>({
+        type: 'IMPORT_PACK',
+        payload: { data, passphrase: importPass || undefined },
+      })
+
+      if (res.success && res.data) {
+        setStatusMsg(`Imported ${res.data.imported}, skipped ${res.data.skipped}`)
+        await loadAccounts()
+      } else {
+        setStatusMsg('Import failed: ' + (res.error || 'unknown'))
+      }
+    } catch (err) {
+      setStatusMsg('Import failed: ' + (err instanceof Error ? err.message : 'unknown'))
+    } finally {
+      setIsImporting(false)
+      e.target.value = ''
     }
+  }
+
+  const openIssuesPage = () => {
+    void chrome.tabs.create({ url: ISSUES_URL })
   }
 
   const handleDeleteAllAccounts = async () => {
@@ -497,8 +526,8 @@ export default function PopupApp() {
             </div>
             <label className="upload">
               <FileArrowUp size={18} />
-              <span>Choose pack file</span>
-              <input type="file" accept=".testvault,.json" onChange={handleImportFile} />
+              <span>{isImporting ? 'Importing...' : 'Choose pack file'}</span>
+              <input type="file" accept=".testvault,.json" onChange={handleImportFile} disabled={isImporting} />
             </label>
           </section>
         )}
@@ -520,6 +549,13 @@ export default function PopupApp() {
                     <ArrowsClockwise size={16} /> System
                   </button>
                 </div>
+              </div>
+              <div className="support-zone">
+                <strong>Support</strong>
+                <p>Open GitHub issues to report import, save, or autofill problems.</p>
+                <button className="btn" onClick={openIssuesPage}>
+                  <BugBeetleIcon size={16} /> Report bug
+                </button>
               </div>
               <div className="danger-zone">
                 <strong>Auto-destruction</strong>

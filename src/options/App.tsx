@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
+import { BugBeetleIcon } from '@phosphor-icons/react'
 import { sendMessage } from '../shared/messaging'
 import type { Account, AccountStatus, Environment } from '../core/types'
-import { ENVIRONMENTS, STATUSES } from '../shared/constants'
+import { ENVIRONMENTS, ISSUES_URL, STATUSES } from '../shared/constants'
 import './options.css'
 
 type ViewMode = 'list' | 'edit' | 'import'
@@ -35,6 +36,9 @@ export default function OptionsApp() {
   const [importPass, setImportPass] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [statusMsg, setStatusMsg] = useState('')
+  const [formError, setFormError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
 
   const loadAccounts = useCallback(async () => {
     const res = await sendMessage<Account[]>({ type: 'GET_ALL_ACCOUNTS' })
@@ -58,6 +62,7 @@ export default function OptionsApp() {
   })
 
   const openEditor = (account?: Account) => {
+    setFormError('')
     if (account) {
       setEditingId(account.id)
       setForm({ ...account })
@@ -73,19 +78,39 @@ export default function OptionsApp() {
   }
 
   const handleSave = async () => {
+    setFormError('')
+    setStatusMsg('')
+
+    if (!form.username.trim() || !form.password.trim()) {
+      setFormError('Username and Password are required.')
+      return
+    }
+
     const accountData = {
       ...form,
       tags: tagsInput.split(',').map((s) => s.trim()).filter(Boolean),
       domainPatterns: patternsInput.split(',').map((s) => s.trim()).filter(Boolean),
     }
 
-    if (editingId) {
-      await sendMessage({ type: 'UPDATE_ACCOUNT', payload: { id: editingId, ...accountData } })
-    } else {
-      await sendMessage({ type: 'CREATE_ACCOUNT', payload: accountData })
+    setIsSaving(true)
+    try {
+      const res = editingId
+        ? await sendMessage({ type: 'UPDATE_ACCOUNT', payload: { id: editingId, ...accountData } })
+        : await sendMessage({ type: 'CREATE_ACCOUNT', payload: accountData })
+
+      if (!res.success) {
+        setFormError(res.error || 'Could not save account.')
+        return
+      }
+
+      await loadAccounts()
+      setStatusMsg(editingId ? 'Identity updated successfully.' : 'Identity saved successfully.')
+      setView('list')
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unexpected error while saving.')
+    } finally {
+      setIsSaving(false)
     }
-    await loadAccounts()
-    setView('list')
   }
 
   const handleDelete = async (id: string) => {
@@ -105,7 +130,7 @@ export default function OptionsApp() {
 
   const handleExport = async () => {
     const ids = selectedIds.size > 0 ? Array.from(selectedIds) : null
-    const res = await sendMessage<{ data: string | ArrayBuffer; encrypted: boolean }>({
+    const res = await sendMessage<{ data: string | number[]; encrypted: boolean }>({
       type: 'EXPORT_PACK',
       payload: { accountIds: ids, label: exportLabel, passphrase: exportPass || undefined },
     })
@@ -115,7 +140,7 @@ export default function OptionsApp() {
     }
 
     const blob = res.data.encrypted
-      ? new Blob([res.data.data as ArrayBuffer], { type: 'application/octet-stream' })
+      ? new Blob([new Uint8Array(res.data.data as number[])], { type: 'application/octet-stream' })
       : new Blob([res.data.data as string], { type: 'application/json' })
 
     const url = URL.createObjectURL(blob)
@@ -132,26 +157,47 @@ export default function OptionsApp() {
     if (!file) return
 
     const isEncrypted = !file.name.endsWith('.json')
-    let data: string | ArrayBuffer
+    setIsImporting(true)
+    setStatusMsg('')
 
-    if (isEncrypted && importPass) {
-      data = await file.arrayBuffer()
-    } else {
-      data = await file.text()
+    try {
+      let data: string | number[]
+
+      if (isEncrypted && importPass) {
+        data = Array.from(new Uint8Array(await file.arrayBuffer()))
+      } else {
+        data = await file.text()
+        if (isEncrypted) {
+          try {
+            JSON.parse(data)
+          } catch {
+            throw new Error('Passphrase required for encrypted pack')
+          }
+        }
+      }
+
+      const res = await sendMessage<{ imported: number; skipped: number }>({
+        type: 'IMPORT_PACK',
+        payload: { data, passphrase: importPass || undefined },
+      })
+
+      if (res.success && res.data) {
+        setStatusMsg(`Imported ${res.data.imported}, skipped ${res.data.skipped} duplicates`)
+        await loadAccounts()
+        setView('list')
+      } else {
+        setStatusMsg('Import failed: ' + (res.error || 'unknown'))
+      }
+    } catch (err) {
+      setStatusMsg('Import failed: ' + (err instanceof Error ? err.message : 'unknown'))
+    } finally {
+      setIsImporting(false)
+      e.target.value = ''
     }
+  }
 
-    const res = await sendMessage<{ imported: number; skipped: number }>({
-      type: 'IMPORT_PACK',
-      payload: { data, passphrase: importPass || undefined },
-    })
-
-    if (res.success && res.data) {
-      setStatusMsg(`Imported ${res.data.imported}, skipped ${res.data.skipped} duplicates`)
-      await loadAccounts()
-      setView('list')
-    } else {
-      setStatusMsg('Import failed: ' + (res.error || 'unknown'))
-    }
+  const openIssuesPage = () => {
+    void chrome.tabs.create({ url: ISSUES_URL })
   }
 
   if (view === 'edit') {
@@ -162,7 +208,12 @@ export default function OptionsApp() {
             <img src="/icon.png" alt="TestVault icon" className="options-logo" />
             <h1>TestVault Orbit</h1>
           </div>
-          <span className="badge">TEST USE ONLY</span>
+          <div className="header-actions">
+            <span className="badge">TEST USE ONLY</span>
+            <button className="btn btn-secondary report-btn" onClick={openIssuesPage}>
+              <BugBeetleIcon size={16} /> Report bug
+            </button>
+          </div>
         </header>
         <div className="options-content">
           <div className="editor">
@@ -187,8 +238,11 @@ export default function OptionsApp() {
             </label>
             <label>Notes<textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} /></label>
 
+            {formError && <div className="form-error">{formError}</div>}
             <div className="editor-actions">
-              <button className="btn btn-primary" onClick={handleSave}>Save</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </button>
               <button className="btn btn-secondary" onClick={() => setView('list')}>Cancel</button>
             </div>
           </div>
@@ -205,13 +259,18 @@ export default function OptionsApp() {
             <img src="/icon.png" alt="TestVault icon" className="options-logo" />
             <h1>TestVault Orbit</h1>
           </div>
-          <span className="badge">TEST USE ONLY</span>
+          <div className="header-actions">
+            <span className="badge">TEST USE ONLY</span>
+            <button className="btn btn-secondary report-btn" onClick={openIssuesPage}>
+              <BugBeetleIcon size={16} /> Report bug
+            </button>
+          </div>
         </header>
         <div className="options-content">
           <div className="import-section">
             <h2>Import Pack</h2>
             <label>Passphrase (if encrypted)<input value={importPass} onChange={(e) => setImportPass(e.target.value)} type="password" /></label>
-            <input type="file" accept=".testvault,.json" onChange={handleImportFile} />
+            <input type="file" accept=".testvault,.json" onChange={handleImportFile} disabled={isImporting} />
             {statusMsg && <div className="status-msg">{statusMsg}</div>}
             <button className="btn btn-secondary" onClick={() => setView('list')}>Back</button>
           </div>
@@ -227,7 +286,12 @@ export default function OptionsApp() {
           <img src="/icon.png" alt="TestVault icon" className="options-logo" />
           <h1>TestVault Orbit</h1>
         </div>
-        <span className="badge">TEST USE ONLY</span>
+        <div className="header-actions">
+          <span className="badge">TEST USE ONLY</span>
+          <button className="btn btn-secondary report-btn" onClick={openIssuesPage}>
+            <BugBeetleIcon size={16} /> Report bug
+          </button>
+        </div>
       </header>
 
       <div className="options-toolbar">

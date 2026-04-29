@@ -42,9 +42,21 @@ body {
   flex-shrink: 0;
 }
 .options-header h1 { font-size: 26px; font-weight: 700; color: var(--text); font-family: 'Sora', sans-serif; }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .badge {
   font-size: 10px; font-weight: 700; background: linear-gradient(120deg, var(--accent), var(--accent-2));
   color: #08142b; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.6px;
+}
+.report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .options-toolbar { display: flex; gap: 10px; padding: 16px 0; align-items: center; flex-wrap: wrap; }
 .search-input, .options-toolbar select, .options-export-bar input, .editor input, .editor select, .editor textarea, .import-section input[type="password"] {
@@ -61,6 +73,10 @@ body {
 .status-msg {
   padding: 10px 12px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 10px; margin-bottom: 12px; font-size: 13px; color: var(--muted);
+}
+.form-error {
+  padding: 10px 12px; background: rgba(255, 109, 148, 0.14); border: 1px solid rgba(255,109,148,.5);
+  border-radius: 10px; margin-top: 12px; font-size: 13px; color: #ffd5e2;
 }
 .options-content { padding: 16px 0 40px; }
 .accounts-table {
@@ -96,6 +112,7 @@ body {
   transition: transform .18s ease, filter .18s ease;
 }
 .btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 .btn-sm { font-size: 11px; padding: 5px 10px; margin-right: 4px; }
 .btn-primary {
   background: linear-gradient(120deg, var(--accent), var(--accent-2)); color: #04162f; border-color: transparent;

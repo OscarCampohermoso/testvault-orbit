@@ -76,7 +76,7 @@ async function handleVaultMessage(msg: Message): Promise<MessageResponse> {
     }
 
     case 'IMPORT_PACK': {
-      const { data, passphrase } = msg.payload as { data: string | ArrayBuffer; passphrase?: string }
+      const { data, passphrase } = msg.payload as { data: string | number[]; passphrase?: string }
       const result = await importPack(data, passphrase)
       return { success: true, data: result }
     }

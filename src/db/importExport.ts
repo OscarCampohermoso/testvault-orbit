@@ -7,7 +7,7 @@ export async function exportPack(
   accountIds: string[] | null,
   label: string,
   passphrase?: string
-): Promise<{ data: string | ArrayBuffer; encrypted: boolean }> {
+): Promise<{ data: string | number[]; encrypted: boolean }> {
   const all = await getAllAccounts()
   const selected = accountIds ? all.filter((a) => accountIds.includes(a.id)) : all
 
@@ -34,21 +34,25 @@ export async function exportPack(
 
   if (passphrase) {
     const encrypted = await encrypt(json, passphrase)
-    return { data: encrypted, encrypted: true }
+    return { data: Array.from(new Uint8Array(encrypted)), encrypted: true }
   }
 
   return { data: json, encrypted: false }
 }
 
 export async function importPack(
-  data: string | ArrayBuffer,
+  data: string | number[],
   passphrase?: string
 ): Promise<{ imported: number; skipped: number }> {
   let json: string
 
   if (typeof data !== 'string') {
     if (!passphrase) throw new Error('Passphrase required for encrypted pack')
-    json = await decrypt(data, passphrase)
+    try {
+      json = await decrypt(new Uint8Array(data).buffer, passphrase)
+    } catch {
+      throw new Error('Invalid passphrase or encrypted pack')
+    }
   } else {
     json = data
   }
